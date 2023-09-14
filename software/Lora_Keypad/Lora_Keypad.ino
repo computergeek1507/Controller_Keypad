@@ -17,10 +17,12 @@ Preferences preferences;
 
 #include <HTTPClient.h>
 
+#define WM_NOHELP
 #include <WiFiManager.h> // https://github.com/tzapu/WiFiManager
 WiFiManager wm;
 WiFiManagerParameter custom_fpp_server("server", "FPP Master", "192.168.5.198", 15);
 WiFiManagerParameter custom_subnet("subnet", "Controller Subnet ie'192.168.5'", "192.168.5", 11);
+WiFiManagerParameter custom_playlist("playlist", "Playlist to start", "Main", 100);
 
 //define the pins used by the LoRa transceiver module
 #define SCK 5
@@ -61,6 +63,7 @@ String inputText;
 
 String FPP_server;
 String controller_subnet;
+String playlist;
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RST);
 
@@ -76,6 +79,10 @@ void setup() {
   controller_subnet = preferences.getString("controller_subnet", "192.168.5");
   if(!controller_subnet.isEmpty()){
     custom_subnet.setValue(controller_subnet.c_str(),11);
+  }
+  playlist = preferences.getString("playlist", "Main");
+  if(!playlist.isEmpty()){
+    custom_playlist.setValue(playlist.c_str(),100);
   }
 
   //reset OLED display via software
@@ -95,10 +102,10 @@ void setup() {
   display.setTextColor(WHITE);
   display.setTextSize(1);
   display.setCursor(0,0);
-  display.print("CONTROLLER KEYPAD");
+  display.print("Controller Keypad");
   display.display();
 
-  Serial.println("CONTROLLER KEYPAD");
+  Serial.println("Controller Keypad");
 
   //SPI LoRa pins
   SPI.begin(SCK, MISO, MOSI, SS);
@@ -120,21 +127,25 @@ void setup() {
     //wm.resetSettings();
     wm.addParameter(&custom_fpp_server);
     wm.addParameter(&custom_subnet);
+    wm.addParameter(&custom_playlist);
     wm.setConfigPortalBlocking(false);
+    wm.setParamsPage(true);
+    std::vector<const char *> menuIds  = {"wifi","param","info","update"};
+    wm.setMenu(menuIds);
+    wm.setTitle("Controller Keypad");
     wm.setSaveParamsCallback(saveParamsCallback);
 
     //automatically connect using saved credentials if they exist
     //If connection fails it starts an access point with the specified name
     if(wm.autoConnect("KeypadAP")){
-        Serial.println("connected...yeey :)");
         display.setCursor(0,20);
         display.print("Wifi Connected " + wm.getWiFiSSID(false));
         display.setCursor(0,30);
         display.print("Wifi IP " + WiFi.localIP().toString());
         display.display();
+        wm.startWebPortal();
     }
     else {
-        Serial.println("Configportal running");
         display.setCursor(0,20);
         display.print("Wifi Portal started" + wm.getWiFiSSID(false));
         display.display();
@@ -163,7 +174,7 @@ void DisplayText()
 {
   display.clearDisplay();
   display.setCursor(0,0);
-  display.println("CONTROLLER KEYPAD");
+  display.println("Controller Keypad");
   display.setTextSize(1);
   display.setCursor(0,30);
   display.print(inputText);
@@ -182,7 +193,7 @@ void SendText()
   
   display.clearDisplay();
   display.setCursor(0,0);
-  display.println("CONTROLLER KEYPAD");
+  display.println("Controller Keypad");
   display.setCursor(0,40);
   display.setTextSize(1);
   display.print("LoRa packet sent:" + inputText);
@@ -215,6 +226,9 @@ void saveParamsCallback () {
   Serial.println(custom_subnet.getValue());
   controller_subnet = custom_subnet.getValue();
   preferences.putString("controller_subnet", controller_subnet);
+
+  playlist = custom_playlist.getValue();
+  preferences.putString("playlist", playlist);
 }
 
 bool SendWIFICommand ( String number, String &message )
@@ -234,6 +248,18 @@ bool SendWIFICommand ( String number, String &message )
     message = "controller_subnet is empty";
     return false;
   }
+  if(number == "400")
+  {
+    return StartPlaylist();
+  }
+  if(number == "500")
+  {
+    return StopPlaylist();
+  }
+  if(number == "501")
+  {
+    return StopGracefullyPlaylist();
+  }
   if(number == "999")
   {
     return TurnOffAllController();
@@ -245,7 +271,6 @@ bool SendWIFICommand ( String number, String &message )
   //http://192.168.5.198/api/command/Controller%20Set%20Test%20Mode%20Off%20Auto/192.168.8.179
   return ToggleController(number);
 }
-
 
 bool ToggleController ( String number )
 {
@@ -265,11 +290,28 @@ bool TurnOnAllController ()
 bool TurnOffAllController ()
 {
   //Controller Set All Test Mode Off
-  //Controller Set All Test Mode Off
   String url = "http://" + FPP_server + "/api/command/Controller%20Set%20All%20Test%20Mode%20Off";
   return PostDataToFPP(url);
 }
 
+bool StartPlaylist ()
+{
+  //Controller Set All Test Mode Off
+  String url = "http://" + FPP_server + "/api/playlist/" + playlist + "/start";
+  return PostDataToFPP(url);
+}
+
+bool StopPlaylist ()
+{
+  String url = "http://" + FPP_server + "/api/playlists/stop";
+  return PostDataToFPP(url);
+}
+
+bool StopGracefullyPlaylist ()
+{
+  String url = "http://" + FPP_server + "/api/playlists/stopgracefully";
+  return PostDataToFPP(url);
+}
 
 bool PostDataToFPP ( String httpRequestData )
 {
