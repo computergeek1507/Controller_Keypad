@@ -1,5 +1,23 @@
-#include <SPI.h>
-#include <LoRa.h>
+//#define USE_HELTEC_WIFI
+#define USE_FEATHER_32
+
+#if defined(USE_HELTEC_WIFI)
+#define USE_LORA
+//OLED pins
+#define OLED_SDA 4
+#define OLED_SCL 15 
+#define LORA_TEXT 40 
+#define WIFI_TEXT 50 
+#endif
+
+#if defined(USE_FEATHER_32)
+//#define USE_XBEE
+//OLED pins
+#define OLED_SDA 23
+#define OLED_SCL 22 
+//#define LORA_TEXT -1 
+#define WIFI_TEXT 40 
+#endif
 
 #include <Wire.h>
 #include <Adafruit_GFX.h>
@@ -24,6 +42,9 @@ WiFiManagerParameter custom_fpp_server("server", "FPP Master", "192.168.5.198", 
 WiFiManagerParameter custom_subnet("subnet", "Controller Subnet ie'192.168.5'", "192.168.5", 11);
 WiFiManagerParameter custom_playlist("playlist", "Playlist to start", "Main", 100);
 
+#if defined(USE_LORA)
+#include <SPI.h>
+#include <LoRa.h>
 //define the pins used by the LoRa transceiver module
 #define SCK 5
 #define MISO 19
@@ -36,11 +57,8 @@ WiFiManagerParameter custom_playlist("playlist", "Playlist to start", "Main", 10
 //866E6 for Europe
 //915E6 for North America
 #define BAND 915E6
-
-//OLED pins
-#define OLED_SDA 4
-#define OLED_SCL 15 
-#define OLED_RST 16
+#endif
+#define OLED_RST     -1 
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
 
@@ -53,8 +71,16 @@ char keys[ROWS][COLS] = {
   {'7','8','9'},
   {'*','0','#'}
 };
+
+#if defined(USE_HELTEC_WIFI)
 byte rowPins[ROWS] = {13, 22, 23, 17}; //connect to the row pinouts of the keypad
 byte colPins[COLS] = {32, 33, 12}; //connect to the column pinouts of the keypad
+#endif
+
+#if defined(USE_FEATHER_32)
+byte rowPins[ROWS] = {33, 27, 12, 13}; //connect to the row pinouts of the keypad
+byte colPins[COLS] = {14, 32, 15}; //connect to the column pinouts of the keypad
+#endif
 
 //initialize an instance of class NewKeypad
 Keypad keypad = Keypad( makeKeymap(keys), rowPins, colPins, ROWS, COLS );
@@ -86,10 +112,10 @@ void setup() {
   }
 
   //reset OLED display via software
-  pinMode(OLED_RST, OUTPUT);
-  digitalWrite(OLED_RST, LOW);
-  delay(20);
-  digitalWrite(OLED_RST, HIGH);
+  //pinMode(OLED_RST, OUTPUT);
+  //digitalWrite(OLED_RST, LOW);
+  //delay(20);
+  //digitalWrite(OLED_RST, HIGH);
 
   //initialize OLED
   Wire.begin(OLED_SDA, OLED_SCL);
@@ -97,7 +123,9 @@ void setup() {
     Serial.println(F("SSD1306 allocation failed"));
     for(;;); // Don't proceed, loop forever
   }
-  
+#if defined(USE_FEATHER_32)
+  display.setRotation(2); //rotates text on OLED 1=90 degrees, 2=180 degrees
+#endif  
   display.clearDisplay();
   display.setTextColor(WHITE);
   display.setTextSize(1);
@@ -107,6 +135,7 @@ void setup() {
 
   Serial.println("Controller Keypad");
 
+#if defined(USE_LORA)
   //SPI LoRa pins
   SPI.begin(SCK, MISO, MOSI, SS);
   //setup LoRa transceiver module
@@ -121,6 +150,7 @@ void setup() {
   display.print("LoRa Initializing OK!");
   display.display();
   delay(2000);
+#endif
   //WiFi.mode(WIFI_STA); // explicitly set mode, esp defaults to STA+AP    
     
     //reset settings - wipe credentials for testing
@@ -135,6 +165,21 @@ void setup() {
     wm.setTitle("Controller Keypad");
     wm.setSaveParamsCallback(saveParamsCallback);
 
+    wm.setSaveConfigCallback([&]()
+    {
+        display.clearDisplay();
+        display.setCursor(0,0);
+        display.println("Controller Keypad");
+        display.setTextSize(1);
+        if(WiFi.status() == WL_CONNECTED) {
+          display.setCursor(0,20);
+          display.print("Wifi Connected " + wm.getWiFiSSID(false));
+          display.setCursor(0,30);
+          display.print("Wifi IP " + WiFi.localIP().toString());
+          display.display();
+        }
+    });
+
     //automatically connect using saved credentials if they exist
     //If connection fails it starts an access point with the specified name
     if(wm.autoConnect("KeypadAP")){
@@ -147,7 +192,9 @@ void setup() {
     }
     else {
         display.setCursor(0,20);
-        display.print("Wifi Portal started" + wm.getWiFiSSID(false));
+        display.print("Wifi Portal started");
+        display.setCursor(0,30);
+        display.print(wm.getConfigPortalSSID());
         display.display();
     }
 }
@@ -185,27 +232,29 @@ void SendText()
 {
   Serial.print("Sending packet: ");
   Serial.println(inputText);
-
+#if defined(USE_LORA)
   //Send LoRa packet to receiver
   LoRa.beginPacket();
   LoRa.print(inputText);
   LoRa.endPacket();
-  
+#endif
   display.clearDisplay();
   display.setCursor(0,0);
   display.println("Controller Keypad");
-  display.setCursor(0,40);
+  #if defined(USE_LORA)
+  display.setCursor(0,LORA_TEXT);
   display.setTextSize(1);
   display.print("LoRa packet sent:" + inputText);
+  #endif
   //display.setCursor(0,30);
   //display.print(inputText);
   String message;
   if(SendWIFICommand(inputText, message)) {
-    display.setCursor(0,50);
+    display.setCursor(0,WIFI_TEXT);
     display.setTextSize(1);
     display.print("WIFI packet sent:" + inputText);
   }else{
-    display.setCursor(0,50);
+    display.setCursor(0,WIFI_TEXT);
     display.setTextSize(1);
     display.print("WIFI Failed " + message);
   }
